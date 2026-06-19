@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Internal storage -->
+    <files-path name="internal_files" path="." />
+
+    <!-- Optional: for external storage like Downloads -->
+    <external-path name="external_files" path="." />
+</paths>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "917348563101",
+    "project_id": "friendpharma-a8bdf",
+    "storage_bucket": "friendpharma-a8bdf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:917348563101:android:d7a5f22f7608c3d557bc74",
+        "android_client_info": {
+          "package_name": "com.friendspharma.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCrZ-350fWz_6jrMFfQnznO92qTQSgLJRQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
