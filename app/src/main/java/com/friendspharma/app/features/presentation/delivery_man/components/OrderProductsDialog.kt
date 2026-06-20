@@ -1,6 +1,7 @@
 package com.friendspharma.app.features.presentation.delivery_man.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,9 +74,8 @@ fun OrderProductsDialog(
     onRestoreProduct: (Int) -> Unit,
     onUpdateQty: (Int, Double) -> Unit,
     onReturnAll: () -> Unit,
-    onUpdateInvoice: (onSuccess: () -> Unit, onError: () -> Unit) -> Unit,
-    // ✅ Delivered button — confirms delivery, moves to Delivered tab
-    onConfirmCashCollection: () -> Unit
+    onRestoreAll: () -> Unit,
+    onUpdateInvoice: (onSuccess: () -> Unit, onError: () -> Unit) -> Unit
 ) {
     val products   = state.orderProducts
     val editedQtys = state.editedQuantities
@@ -83,6 +85,11 @@ fun OrderProductsDialog(
     val updatedTotal  = products.sumOf { p ->
         val qty = editedQtys[p.PID_TRAN_DTL] ?: p.QUANTITY ?: 0.0
         qty * (p.SALES_PRICE ?: 0.0)
+    }
+
+    // All lines reduced to 0 → drives the Return all / Restore all toggle
+    val allReturned = products.isNotEmpty() && products.all { p ->
+        (editedQtys[p.PID_TRAN_DTL] ?: p.QUANTITY ?: 0.0) <= 0.0
     }
 
     val currentItem = if (state.currentCollectionItem.INVOICE_NO != null)
@@ -129,6 +136,15 @@ fun OrderProductsDialog(
                 )
 
                 HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
+
+                // ── List toolbar: item count + bulk Return all ─────────────
+                ListToolbar(
+                    count        = products.size,
+                    allReturned  = allReturned,
+                    onReturnAll  = onReturnAll,
+                    onRestoreAll = onRestoreAll
+                )
+
                 ColumnLabels()
                 HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
 
@@ -190,8 +206,7 @@ fun OrderProductsDialog(
                             { /* onSuccess — dialog stays open after update */ },
                             { invoiceError = true }
                         )
-                    },
-                    onConfirmDelivered      = onConfirmCashCollection
+                    }
                 )
             }
         }
@@ -414,14 +429,80 @@ private fun SmallIconButton(icon: ImageVector, onClick: () -> Unit, enabled: Boo
     }
 }
 
-// ─── Footer: Update Invoice + Delivered ───────────────────────────────────────
+// ─── List toolbar: item count + bulk Return all ───────────────────────────────
+@Composable
+private fun ListToolbar(
+    count: Int,
+    allReturned: Boolean,
+    onReturnAll: () -> Unit,
+    onRestoreAll: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Text(
+            text       = "Products ($count)",
+            fontSize   = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color      = TextPrimary
+        )
+        if (count > 0) {
+            ReturnAllToggle(
+                allReturned  = allReturned,
+                onReturnAll  = onReturnAll,
+                onRestoreAll = onRestoreAll
+            )
+        }
+    }
+}
+
+// ─── Return all / Restore all toggle (outlined secondary action) ──────────────
+@Composable
+private fun ReturnAllToggle(
+    allReturned: Boolean,
+    onReturnAll: () -> Unit,
+    onRestoreAll: () -> Unit
+) {
+    val label  = if (allReturned) "Restore all" else "Return all"
+    val color  = if (allReturned) Purple else RedReturn
+    val icon   = if (allReturned) Icons.Rounded.Refresh else Icons.Rounded.Replay
+    val action = if (allReturned) onRestoreAll else onReturnAll
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+            .clickable { action() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = null,
+            tint               = color,
+            modifier           = Modifier.size(13.dp)
+        )
+        Text(
+            text       = label,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color      = color
+        )
+    }
+}
+
+// ─── Footer: Total + Update Invoice ───────────────────────────────────────────
 @Composable
 private fun DialogFooter(
     originalTotal: Double,
     updatedTotal: Double,
     invoiceError: Boolean,
-    onUpdateInvoice: () -> Unit,
-    onConfirmDelivered: () -> Unit
+    onUpdateInvoice: () -> Unit
 ) {
     val hasChanges = "%.2f".format(originalTotal) != "%.2f".format(updatedTotal)
 
@@ -431,41 +512,37 @@ private fun DialogFooter(
             .background(SurfaceBg)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        // Totals
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (hasChanges) {
-                Row(
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("Original", fontSize = 11.sp, color = TextTertiary)
+        // Total — label + (optional) original on the left, big amount on the right
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text       = if (hasChanges) "Updated total" else "Total payable",
+                    fontSize   = 11.sp,
+                    color      = TextSecondary,
+                    fontWeight = FontWeight.Medium
+                )
+                if (hasChanges) {
                     Text(
-                        text           = "৳${"%.2f".format(originalTotal)}",
-                        fontSize       = 12.sp,
+                        text           = "was ৳${"%.2f".format(originalTotal)}",
+                        fontSize       = 11.sp,
                         color          = TextTertiary,
                         textDecoration = TextDecoration.LineThrough
                     )
                 }
             }
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text     = if (hasChanges) "Updated" else "Total",
-                    fontSize = 11.sp,
-                    color    = TextSecondary
-                )
-                Text(
-                    text       = "৳${"%.2f".format(updatedTotal)}",
-                    fontSize   = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = Purple
-                )
-            }
+            Text(
+                text       = "৳${"%.2f".format(updatedTotal)}",
+                fontSize   = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color      = Purple
+            )
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
         // Error message
         if (invoiceError) {
@@ -482,38 +559,20 @@ private fun DialogFooter(
             Spacer(Modifier.height(8.dp))
         }
 
-        // ── Two buttons ───────────────────────────────────────────────────────
-        Row(
-            modifier              = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // ── Single primary action ─────────────────────────────────────────────
+        // Delivery is confirmed from the order card (not here), so the delivery
+        // man can't accidentally deliver without first submitting the update.
+        Button(
+            onClick   = onUpdateInvoice,
+            modifier  = Modifier.fillMaxWidth().height(48.dp),
+            shape     = RoundedCornerShape(10.dp),
+            colors    = ButtonDefaults.buttonColors(
+                containerColor = Purple,
+                contentColor   = Color.White
+            ),
+            elevation = ButtonDefaults.buttonElevation(0.dp)
         ) {
-            // Update Invoice — saves changes, dialog stays open
-            OutlinedButton(
-                onClick        = onUpdateInvoice,
-                modifier       = Modifier.weight(1f).height(46.dp),
-                shape          = RoundedCornerShape(10.dp),
-                colors         = ButtonDefaults.outlinedButtonColors(
-                    containerColor = PurpleLight,
-                    contentColor   = Purple
-                ),
-                border         = androidx.compose.foundation.BorderStroke(1.dp, PurpleBorder)
-            ) {
-                Text(text = "Update Invoice", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
-
-            // Delivered — confirms delivery, moves order to Delivered tab
-            Button(
-                onClick   = onConfirmDelivered,
-                modifier  = Modifier.weight(1f).height(46.dp),
-                shape     = RoundedCornerShape(10.dp),
-                colors    = ButtonDefaults.buttonColors(
-                    containerColor = GreenTeal,
-                    contentColor   = Color.White
-                ),
-                elevation = ButtonDefaults.buttonElevation(0.dp)
-            ) {
-                Text(text = "Delivered", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
+            Text(text = "Update Invoice", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

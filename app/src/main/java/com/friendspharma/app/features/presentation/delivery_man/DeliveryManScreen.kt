@@ -9,14 +9,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -39,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +61,7 @@ import com.friendspharma.app.core.components.Loader
 import com.friendspharma.app.core.components.ReturnDrawer
 import com.friendspharma.app.core.util.KeyboardUnFocusHandler
 import com.friendspharma.app.features.NavigationActions
+import com.friendspharma.app.features.data.remote.model.PendingDeliveryDto
 import com.friendspharma.app.features.presentation.delivery_man.components.CashCollectionList
 import com.friendspharma.app.features.presentation.delivery_man.components.DeliveriesDone
 import com.friendspharma.app.features.presentation.delivery_man.components.DeliveryDetailsDialog
@@ -145,8 +155,7 @@ fun DeliveryManScreen(
                 )
 
             //Tab 1: Intransit — OrderProductsDialog ────────────────────
-            // [Update Invoice] → saves, dialog stays open
-
+            // [Update Invoice] → batch POST, dialog stays open & refreshes
             // [Delivered] → confirmDelivered() → moves to Delivered tab
             if (state.showProductDialog
                 && state.currentPaid.INVOICE_NO == null
@@ -159,25 +168,15 @@ fun DeliveryManScreen(
                     onRestoreProduct = { viewModel.restoreProduct(it) },
                     onUpdateQty      = { pid, qty -> viewModel.updateProductQuantity(pid, qty) },
                     onReturnAll      = { viewModel.returnAllProducts() },
+                    onRestoreAll     = { viewModel.restoreAllProducts() },
                     onUpdateInvoice  = { onSuccess, onError ->
-                        viewModel.submitReturnedProducts(
-                            onSuccess = {
-                                // Refresh intransit list in background
-                                viewModel.refreshIntransitList()
-                                // Reload products with fresh data from server
-                                viewModel.loadOrderProducts(
-                                    state.currentCollectionItem.PID_TRAN_MST.toString()
-                                )
-                                onSuccess()
-                            },
-                            onError = onError
+                        viewModel.submitUpdatedInvoice(
+                            onSuccess = { onSuccess() },
+                            onError   = { msg ->
+                                scope.launch { snackBarHostState.showSnackbar(msg) }
+                                onError()
+                            }
                         )
-                    },
-                    onConfirmCashCollection = {
-                        // "Delivered" button → moves Intransit → Delivered
-                        viewModel.confirmDelivered(state.currentCollectionItem)
-                        viewModel.closeProductDialog()
-                        viewModel.closeDetails()
                     }
                 )
             }
@@ -236,21 +235,38 @@ fun DeliveryManScreen(
                     }
                 }
 
+                DeliverySearchBar(
+                    query         = state.searchQuery,
+                    onQueryChange = viewModel::onSearchQueryChange
+                )
+
                 Box(Modifier.weight(1f)) {
+                    val q = state.searchQuery
                     when (selectedTabIndex) {
                         // Tab 0: Order List → [Invoice] opens product list dialog
                         //                  → [Pickup] confirms directly
-                        0 -> PendingDeliveries(viewModel = viewModel, state = state)
+                        0 -> PendingDeliveries(
+                            viewModel = viewModel,
+                            state     = state.copy(deliveries = state.deliveries.filteredBy(q))
+                        )
 
-                        // Tab 1: Intransit → click card → OrderProductsDialog
-                        // [Update Invoice] → [Delivered]
-                        1 -> DeliveriesDone(viewModel = viewModel, state = state)
+                        // Tab 1: Intransit → click card → OrderProductsDialog → [Update Invoice]
+                        1 -> DeliveriesDone(
+                            viewModel = viewModel,
+                            state     = state.copy(deliveriesDone = state.deliveriesDone.filteredBy(q))
+                        )
 
                         // Tab 2: Delivered → [Confirm Cash Collection] on card
-                        2 -> PaidDeliveries(viewModel = viewModel, state = state)
+                        2 -> PaidDeliveries(
+                            viewModel = viewModel,
+                            state     = state.copy(deliveriesPaid = state.deliveriesPaid.filteredBy(q))
+                        )
 
                         // Tab 3: Cash Collection → click card → PaidDialog (read-only)
-                        3 -> CashCollectionList(viewModel = viewModel, state = state)
+                        3 -> CashCollectionList(
+                            viewModel = viewModel,
+                            state     = state.copy(deliveriesCollected = state.deliveriesCollected.filteredBy(q))
+                        )
                     }
                 }
 
@@ -261,4 +277,50 @@ fun DeliveryManScreen(
                 Loader(paddingValues = paddingValues)
         }
     }
+}
+
+// Filters a delivery list by invoice no, shop name, address, or phone.
+private fun PendingDeliveryDto.filteredBy(query: String): PendingDeliveryDto {
+    val q = query.trim()
+    if (q.isBlank()) return this
+    val list = (data ?: emptyList()).filter { item ->
+        listOf(item.INVOICE_NO, item.USER_NAME, item.ADDRESS, item.MOBILE_NO)
+            .any { it?.contains(q, ignoreCase = true) == true }
+    }
+    return copy(data = list)
+}
+
+@Composable
+private fun DeliverySearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value         = query,
+        onValueChange = onQueryChange,
+        modifier      = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        placeholder   = { Text("Search invoice, shop or phone", fontSize = 13.sp, color = Color(0xFFADABB8)) },
+        leadingIcon   = {
+            Icon(Icons.Filled.Search, contentDescription = null, tint = Purple, modifier = Modifier.size(20.dp))
+        },
+        trailingIcon  = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Filled.Close, contentDescription = "Clear", tint = Color(0xFFADABB8), modifier = Modifier.size(18.dp))
+                }
+            }
+        },
+        singleLine = true,
+        shape      = RoundedCornerShape(12.dp),
+        textStyle  = TextStyle(fontSize = 14.sp, color = Color(0xFF1A1A2E)),
+        colors     = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor      = Purple,
+            unfocusedBorderColor    = Color(0xFFE3E0EF),
+            cursorColor             = Purple,
+            focusedContainerColor   = Color.White,
+            unfocusedContainerColor = Color.White
+        )
+    )
 }

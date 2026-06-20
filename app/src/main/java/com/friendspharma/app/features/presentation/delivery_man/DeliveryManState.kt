@@ -17,4 +17,6 @@ data class DeliveryManState(
     val isProductsLoading: Boolean = false,
     val editedQuantities: Map<Int, Double> = emptyMap(),
     val showProductDialog: Boolean = false,
+    val isSubmitting: Boolean = false,        // guards Update Invoice against double-tap
+    val searchQuery: String = "",             // filters the visible delivery list
 )

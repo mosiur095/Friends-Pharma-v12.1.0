@@ -5,14 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.friendspharma.app.MainActivity
 import com.friendspharma.app.core.util.Async
 import com.friendspharma.app.features.NavigationActions
-import com.friendspharma.app.features.data.remote.entity.AddReturn
-import com.friendspharma.app.features.data.remote.entity.SubmitReturn
+import com.friendspharma.app.features.data.remote.entity.UpdateInvoiceItem
+import com.friendspharma.app.features.data.remote.entity.UpdateInvoiceRequest
 import com.friendspharma.app.features.data.remote.model.PendignDeliveryDtoItem
 import com.friendspharma.app.features.data.remote.model.PendingDeliveryDto
 import com.friendspharma.app.features.data.remote.model.UserDto
 import com.friendspharma.app.features.domain.services.SharedPreferenceHelper
-import com.friendspharma.app.features.domain.use_case.AddToReturnUseCase
-import com.friendspharma.app.features.domain.use_case.SubmitReturnUseCase
 import com.friendspharma.app.features.domain.use_case.ConfirmCashCollectionUseCase
 import com.friendspharma.app.features.domain.use_case.ConfirmDeliveryUseCase
 import com.friendspharma.app.features.domain.use_case.ConfirmPickupUseCase
@@ -22,6 +20,7 @@ import com.friendspharma.app.features.domain.use_case.GetOrderDetailsUseCase
 import com.friendspharma.app.features.domain.use_case.GetPaidDeliveriesUseCase
 import com.friendspharma.app.features.domain.use_case.GetPendingDeliveriesUseCase
 import com.friendspharma.app.features.domain.use_case.GetUserUseCase
+import com.friendspharma.app.features.domain.use_case.UpdateInvoiceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +29,18 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import javax.inject.Inject
+
+/** Snapshot of one invoice line as it stands in the UI at submit time. */
+data class InvoiceLineUpdate(
+    val pidTranDtl: Int,
+    val pidProduct: Int,
+    val salesUnit: String,
+    val mrpPrice: Double,
+    val salesPrice: Double,
+    val originalQty: Double,
+    val finalQty: Double,
+    val returnQty: Double        // originalQty - finalQty
+)
 
 @HiltViewModel
 class DeliveryManViewModel @Inject constructor(
@@ -43,8 +54,7 @@ class DeliveryManViewModel @Inject constructor(
     private val getPaidDeliveriesUseCase: GetPaidDeliveriesUseCase,
     private val getUserUseCase: GetUserUseCase,
     private val getOrderDetailsUseCase: GetOrderDetailsUseCase,
-    private val addToReturnUseCase: AddToReturnUseCase,
-    private val submitReturnUseCase: SubmitReturnUseCase
+    private val updateInvoiceUseCase: UpdateInvoiceUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DeliveryManState())
@@ -186,29 +196,35 @@ class DeliveryManViewModel @Inject constructor(
         }
     }
 
+    fun onSearchQueryChange(query: String) {
+        _state.update { it.copy(searchQuery = query) }
+    }
+
     // ── Order Products ────────────────────────────────────────────────────────
+    // Merge by (PID_PRODUCT, SALES_UNIT) and sum quantity — the API returns the
+    // same product as several rows with fractional quantities (e.g. 1.5 + 0.5),
+    // so we combine them into one whole-quantity line, same as the Order Details
+    // screen. Update payload is product-level (pid_product), so we don't need the
+    // individual ppid_tran_dtl rows.
     fun loadOrderProducts(orderId: String) {
         getOrderDetailsUseCase.invoke(orderId)
             .onEach { result ->
                 when (result) {
                     is Async.Success -> {
-                        val filteredProducts = (result.data?.data ?: emptyList())
-                            .filter { it.QUANTITY != null && it.QUANTITY > 0.0 }
-                        val mergedProducts = filteredProducts
-                            .groupBy { Pair(it.PID_PRODUCT, it.SALES_UNIT) }
-                            .map { (_, items) ->
-                                val first      = items.first()
-                                val totalQty   = items.sumOf { it.QUANTITY ?: 0.0 }
-                                val totalPrice = items.sumOf { it.TOTAL_PRICE ?: 0.0 }
-                                first.copy(QUANTITY = totalQty, TOTAL_PRICE = totalPrice)
+                        val products = (result.data?.data ?: emptyList())
+                            .filter { (it.QUANTITY ?: 0.0) > 0.0 }
+                            .groupBy { (it.PID_PRODUCT ?: 0) to (it.SALES_UNIT ?: "") }
+                            .map { (_, rows) ->
+                                rows.first().copy(QUANTITY = rows.sumOf { it.QUANTITY ?: 0.0 })
                             }
-                        val initialQty = mergedProducts.associate { item ->
+
+                        val initialQty = products.associate { item ->
                             (item.PID_TRAN_DTL ?: 0) to (item.QUANTITY ?: 0.0)
                         }
                         _state.update {
                             it.copy(
                                 isProductsLoading = false,
-                                orderProducts     = mergedProducts,
+                                orderProducts     = products,
                                 editedQuantities  = initialQty,
                                 showProductDialog = true
                             )
@@ -223,7 +239,7 @@ class DeliveryManViewModel @Inject constructor(
     fun updateProductQuantity(pidTranDtl: Int, newQty: Double) {
         val product     = state.value.orderProducts.find { it.PID_TRAN_DTL == pidTranDtl }
         val originalQty = product?.QUANTITY ?: 0.0
-        val safeQty     = newQty.coerceIn(0.0, originalQty)
+        val safeQty     = newQty.coerceIn(0.0, originalQty)   // decrease/remove only
         val updated     = state.value.editedQuantities.toMutableMap()
         updated[pidTranDtl] = safeQty
         _state.update { it.copy(editedQuantities = updated) }
@@ -249,6 +265,14 @@ class DeliveryManViewModel @Inject constructor(
         _state.update { it.copy(editedQuantities = updated) }
     }
 
+    fun restoreAllProducts() {
+        val updated = state.value.editedQuantities.toMutableMap()
+        state.value.orderProducts.forEach { product ->
+            updated[product.PID_TRAN_DTL ?: 0] = product.QUANTITY ?: 0.0
+        }
+        _state.update { it.copy(editedQuantities = updated) }
+    }
+
     fun calculateUpdatedTotal(): Double {
         return state.value.orderProducts.sumOf { product ->
             val editedQty = state.value.editedQuantities[product.PID_TRAN_DTL] ?: product.QUANTITY ?: 0.0
@@ -268,65 +292,78 @@ class DeliveryManViewModel @Inject constructor(
     fun isProductReturned(pidTranDtl: Int): Boolean =
         (state.value.editedQuantities[pidTranDtl] ?: 1.0) == 0.0
 
-    fun submitReturnedProducts(onSuccess: () -> Unit, onError: () -> Unit) {
-        val mstId      = state.value.currentCollectionItem.PID_TRAN_MST ?: return
-        val mobileNo   = sharedPreferenceHelper.getUser().MOBILE_NO ?: ""
-        val products   = state.value.orderProducts
-        val editedQtys = state.value.editedQuantities
-
-        val changedProducts = products.filter { product ->
-            val origQty   = product.QUANTITY ?: 0.0
-            val editedQty = editedQtys[product.PID_TRAN_DTL] ?: origQty
-            editedQty < origQty
+    // ── Capture the whole invoice as it stands in the UI right now ─────────────
+    fun captureInvoiceUpdate(): List<InvoiceLineUpdate> =
+        state.value.orderProducts.map { p ->
+            val orig  = p.QUANTITY ?: 0.0
+            val final = state.value.editedQuantities[p.PID_TRAN_DTL] ?: orig
+            InvoiceLineUpdate(
+                pidTranDtl  = p.PID_TRAN_DTL ?: 0,
+                pidProduct  = p.PID_PRODUCT ?: 0,
+                salesUnit   = p.SALES_UNIT ?: "",
+                mrpPrice    = p.MRP_PRICE ?: p.SALES_PRICE ?: 0.0,
+                salesPrice  = p.SALES_PRICE ?: 0.0,
+                originalQty = orig,
+                finalQty    = final,
+                returnQty   = orig - final
+            )
         }
 
-        // Nothing changed — treat as success
-        if (changedProducts.isEmpty()) { onSuccess(); return }
+    private fun Double.asQtyString(): String =
+        if (this % 1.0 == 0.0) toLong().toString() else toString()
 
-        _state.update { it.copy(isProductsLoading = true) }
-        var completed = 0
-        var hasError  = false
+    // ── Update Invoice → single batch POST (return/updateInvoice) ─────────────
+    fun submitUpdatedInvoice(onSuccess: () -> Unit, onError: (String) -> Unit) {
+        if (state.value.isSubmitting) return                                  // double-tap guard
+        val mstId    = state.value.currentCollectionItem.PID_TRAN_MST
+            ?: return onError("Missing order id")
+        val mobileNo = sharedPreferenceHelper.getUser().MOBILE_NO ?: ""
 
-        // POST return/AddReturn for each changed product
-        // NOTE: Do NOT call SubmitReturn — it resets order status back to pending
-        changedProducts.forEach { product ->
-            val origQty   = product.QUANTITY ?: 0.0
-            val editedQty = editedQtys[product.PID_TRAN_DTL] ?: origQty
-            val returnQty = (origQty - editedQty).toInt()
-
-            addToReturnUseCase.invoke(
-                AddReturn(
-                    mobile_no     = mobileNo,
-                    pReturnqty    = returnQty.toString(),
-                    pexpiry_date  = "",
-                    pid_product   = product.PID_PRODUCT ?: 0,
-                    pid_tran_mst  = mstId,
-                    pmrp_price    = (product.MRP_PRICE ?: product.SALES_PRICE ?: 0.0).toString(),
-                    ppid_tran_dtl = product.PID_TRAN_DTL ?: 0,
-                    psales_price  = product.SALES_PRICE?.toString() ?: "0",
-                    psales_type   = product.SALES_UNIT ?: ""
+        // Only reduced/removed lines become return items (product-level)
+        val items = captureInvoiceUpdate()
+            .filter { it.returnQty > 0.0 }
+            .map { line ->
+                UpdateInvoiceItem(
+                    pid_product  = line.pidProduct,
+                    psales_type  = line.salesUnit,
+                    pmrp_price   = line.mrpPrice.toString(),
+                    psales_price = line.salesPrice.toString(),
+                    pexpiry_date = "",
+                    pReturnqty   = line.returnQty.asQtyString()
                 )
-            ).onEach { result ->
-                when (result) {
-                    is Async.Success -> {
-                        completed++
-                        if (completed == changedProducts.size) {
-                            _state.update { it.copy(isProductsLoading = false) }
-                            if (hasError) onError() else onSuccess()
-                        }
-                    }
-                    is Async.Error   -> {
-                        hasError = true
-                        completed++
-                        if (completed == changedProducts.size) {
-                            _state.update { it.copy(isProductsLoading = false) }
-                            onError()
-                        }
-                    }
-                    is Async.Loading -> { _state.update { it.copy(isProductsLoading = true) } }
+            }
+
+        if (items.isEmpty()) { onSuccess(); return }                          // nothing changed
+
+        // TODO product decision: if every line is reduced to 0 (full return),
+        // either block here or require a confirm before sending.
+
+        updateInvoiceUseCase.invoke(
+            UpdateInvoiceRequest(pid_tran_mst = mstId, mobile_no = mobileNo, items = items)
+        ).onEach { result ->
+            when (result) {
+                is Async.Loading -> {
+                    _state.update { it.copy(isSubmitting = true, isProductsLoading = true) }
                 }
-            }.launchIn(viewModelScope)
-        }
+                is Async.Success -> {
+                    if (result.data?.status == 200) {
+                        _state.update { it.copy(isSubmitting = false) }
+                        // Atomic update applied → re-sync card + dialog with server truth
+                        refreshIntransitList()
+                        loadOrderProducts(mstId.toString())
+                        onSuccess()
+                    } else {
+                        _state.update { it.copy(isSubmitting = false, isProductsLoading = false) }
+                        onError(result.data?.message ?: "Update failed")
+                    }
+                }
+                is Async.Error -> {
+                    // Atomic endpoint rolled back → nothing changed; keep edits for retry
+                    _state.update { it.copy(isSubmitting = false, isProductsLoading = false) }
+                    onError("Couldn't reach server. Please try again.")
+                }
+            }
+        }.launchIn(viewModelScope)
     }
 
     fun closeProductDialog() {

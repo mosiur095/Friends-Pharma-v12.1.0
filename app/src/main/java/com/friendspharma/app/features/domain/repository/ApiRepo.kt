@@ -12,6 +12,7 @@ import com.friendspharma.app.features.data.remote.entity.SignUp
 import com.friendspharma.app.features.data.remote.entity.SignUpSeller
 import com.friendspharma.app.features.data.remote.entity.SubmitOrder
 import com.friendspharma.app.features.data.remote.entity.SubmitReturn
+import com.friendspharma.app.features.data.remote.entity.UpdateInvoiceRequest
 import com.friendspharma.app.features.data.remote.entity.UpdateProfile
 import com.friendspharma.app.features.data.remote.model.AddReturnDto
 import com.friendspharma.app.features.data.remote.model.AddToCartRestrictDto
@@ -38,6 +39,7 @@ import com.friendspharma.app.features.data.remote.model.SubmitReturnDto
 import com.friendspharma.app.features.data.remote.model.ThanaListDto
 import com.friendspharma.app.features.data.remote.model.TokenDto
 import com.friendspharma.app.features.data.remote.model.TrackOrderDto
+import com.friendspharma.app.features.data.remote.model.UpdateInvoiceDto
 import com.friendspharma.app.features.data.remote.model.UserDetailsDto
 import java.io.File
 
@@ -80,6 +82,9 @@ interface ApiRepo {
 
     // ── Tab 1 Action: Confirm Delivered → Delivered ───────────────────────────
     suspend fun confirmDelivery(id: String, user: String): DeliveredDto
+
+    // ── Tab 1 Action: Update Invoice (batch, single transaction) ──────────────
+    suspend fun updateInvoice(request: UpdateInvoiceRequest): UpdateInvoiceDto
 
     // ── Tab 2: Delivered List ─────────────────────────────────────────────────
     suspend fun getDeliveryDone(id: String): PendingDeliveryDto

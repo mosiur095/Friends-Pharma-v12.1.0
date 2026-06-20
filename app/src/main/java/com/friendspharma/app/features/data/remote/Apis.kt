@@ -12,6 +12,7 @@ import com.friendspharma.app.features.data.remote.entity.ReturnCartRemove
 import com.friendspharma.app.features.data.remote.entity.SignUp
 import com.friendspharma.app.features.data.remote.entity.SubmitOrder
 import com.friendspharma.app.features.data.remote.entity.SubmitReturn
+import com.friendspharma.app.features.data.remote.entity.UpdateInvoiceRequest
 import com.friendspharma.app.features.data.remote.entity.UpdateProfile
 import com.friendspharma.app.features.data.remote.model.AddReturnDto
 import com.friendspharma.app.features.data.remote.model.AddToCartRestrictDto
@@ -38,6 +39,7 @@ import com.friendspharma.app.features.data.remote.model.SubmitReturnDto
 import com.friendspharma.app.features.data.remote.model.ThanaListDto
 import com.friendspharma.app.features.data.remote.model.TokenDto
 import com.friendspharma.app.features.data.remote.model.TrackOrderDto
+import com.friendspharma.app.features.data.remote.model.UpdateInvoiceDto
 import com.friendspharma.app.features.data.remote.model.UserDetailsDto
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
@@ -267,6 +269,14 @@ interface Apis {
         @Query("pUser") user: String,
         @Body() body: RequestBody = "{}".toRequestBody("text/plain".toMediaType())
     ): DeliveredDto
+
+    // ── Delivery: Tab 1 Action - Update Invoice (batch, single transaction) ──
+    @Headers("Content-Type: application/json")
+    @POST("return/updateInvoice")
+    suspend fun updateInvoice(
+        @Header("Authorization") token: String = MainActivity.token,
+        @Body request: UpdateInvoiceRequest
+    ): UpdateInvoiceDto
 
     // ── Delivery: Tab 2 - Delivered List ─────────────────────────────────────
     @Headers("Content-Type: application/json")
