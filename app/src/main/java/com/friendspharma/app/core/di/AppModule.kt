@@ -38,6 +38,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import com.friendspharma.app.BuildConfig
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -57,7 +58,7 @@ object AppModule {
     @Singleton
     fun provideApi(): Apis {
         val client = OkHttpClient.Builder().apply {
-            addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+            addInterceptor(HttpLoggingInterceptor().setLevel(if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE))
             readTimeout(15, TimeUnit.SECONDS)
             writeTimeout(10, TimeUnit.SECONDS)
         }.build()
@@ -80,7 +81,7 @@ object AppModule {
     @Singleton
     fun providePathaoApi(): PathaoApis {
         val client = OkHttpClient.Builder().apply {
-            addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+            addInterceptor(HttpLoggingInterceptor().setLevel(if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE))
             readTimeout(10, TimeUnit.SECONDS)
             writeTimeout(10, TimeUnit.SECONDS)
         }.build()
@@ -100,7 +101,7 @@ object AppModule {
     @Singleton
     fun provideSteadFastApi(): SteadFastApis {
         val client = OkHttpClient.Builder().apply {
-            addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+            addInterceptor(HttpLoggingInterceptor().setLevel(if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE))
             readTimeout(10, TimeUnit.SECONDS)
             writeTimeout(10, TimeUnit.SECONDS)
         }.build()
@@ -180,7 +181,7 @@ object AppModule {
     @Singleton
     fun provideSmsApi(): SmsApis {
         val client = OkHttpClient.Builder().apply {
-            addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+            addInterceptor(HttpLoggingInterceptor().setLevel(if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE))
             readTimeout(10, TimeUnit.SECONDS)
             writeTimeout(10, TimeUnit.SECONDS)
         }.build()

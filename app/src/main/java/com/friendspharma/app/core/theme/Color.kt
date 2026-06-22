@@ -10,6 +10,7 @@ val Purple40 = Color(0xFF6650a4)
 val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 val Primary = Color(0xFF561E61)
+val PrimaryContainer = Primary.copy(alpha = 0.10f) // light plum tint for chips/boxes/steppers
 val BackGroundColor = Primary.copy(alpha = .02f)
 val BackGroundDark = Color(0xFFAFF2F2)
 val GreenLight = Color(0xFFD4E9E2)
@@ -31,6 +32,3 @@ val Orange = Color(0XFFD84315)
 val TextFieldBackGround = Color(0xFFF8F9FE)
 val DeepGreen = Color(0xFF098A50)
 val TealColor = Color(0xFFFF00FF)
-
-
-

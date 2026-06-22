@@ -35,17 +35,45 @@ class GetProductsUseCase @Inject constructor(
     fun invoke(isForceRefresh: Boolean = false): Flow<Async<ProductsDto>> = flow {
         val userType = MainActivity.userType.value
 
+        // ── DIAGNOSTIC ───────────────────────────────────────────────────────
+        // Tells us which bucket/endpoint this fetch is using. If a special user
+        // logs this as "2", the userType is wrong at fetch time (login/profile).
+        android.util.Log.d("FP_FIX", "fetch userType=$userType isForceRefresh=$isForceRefresh")
+        // ─────────────────────────────────────────────────────────────────────
+
         emit(Async.Loading())
 
         if (!isForceRefresh) {
             // Phase 1: First 100 items instantly (~50ms)
             val firstPage = getFirstN(userType, FIRST_PAGE)
+
+            // ── DIAGNOSTIC ───────────────────────────────────────────────────
+            // This is only the FIRST 100 rows. If 316 isn't in that sample,
+            // BOX_SALES_PER reads null because the ITEM is absent — not because
+            // the cached price is null. `present=` disambiguates the two.
+            android.util.Log.d(
+                "FP_FIX",
+                "cache(first100) 316 BOX_SALES_PER=${firstPage.firstOrNull { it.PID_PRODUCT == 316 }?.BOX_SALES_PER} present=${firstPage.any { it.PID_PRODUCT == 316 }}"
+            )
+            // ─────────────────────────────────────────────────────────────────
+
             if (firstPage.isNotEmpty()) {
                 emit(Async.Success(ProductsDto(data = firstPage)))
             }
 
             // Phase 2: All items from cache
             val allCached = getAllCached(userType)
+
+            // ── DIAGNOSTIC ───────────────────────────────────────────────────
+            // This is the list hasChanges actually compares against. If THIS
+            // shows 16.0 while first100 showed null, the cache is fine and the
+            // "keeping cache" decision is correct, not stale.
+            android.util.Log.d(
+                "FP_FIX",
+                "cache(all) 316 BOX_SALES_PER=${allCached.firstOrNull { it.PID_PRODUCT == 316 }?.BOX_SALES_PER} size=${allCached.size}"
+            )
+            // ─────────────────────────────────────────────────────────────────
+
             if (allCached.size > firstPage.size) {
                 emit(Async.Success(ProductsDto(data = allCached)))
             }
@@ -54,6 +82,15 @@ class GetProductsUseCase @Inject constructor(
                 // Background API refresh
                 try {
                     val fresh = callApi(userType).data?.filter { it.PID_PRODUCT != null } ?: emptyList()
+
+                    // ── DIAGNOSTIC ───────────────────────────────────────────
+                    // What the ENDPOINT actually returned for this user's token.
+                    android.util.Log.d(
+                        "FP_FIX",
+                        "api(cached-path) 316 BOX_SALES_PER=${fresh.firstOrNull { it.PID_PRODUCT == 316 }?.BOX_SALES_PER} count=${fresh.size}"
+                    )
+                    // ─────────────────────────────────────────────────────────
+
                     if (fresh.isNotEmpty()) {
                         val cachedMap = allCached.associateBy { it.PID_PRODUCT }
                         val hasChanges = fresh.any { f ->
@@ -64,12 +101,26 @@ class GetProductsUseCase @Inject constructor(
                                     f.BOX_SALES_PRICE  != c.BOX_SALES_PRICE  ||
                                     f.LEAF_MRP_PRICE   != c.LEAF_MRP_PRICE   ||
                                     f.BOX_MRP_PRICE    != c.BOX_MRP_PRICE    ||
+                                    f.BOX_SALES_PER    != c.BOX_SALES_PER    ||
+                                    f.LEAF_SALES_PER   != c.LEAF_SALES_PER   ||
+                                    f.BOX_OFFER_VALUE  != c.BOX_OFFER_VALUE  ||
+                                    f.LEAF_OFFER_VALUE != c.LEAF_OFFER_VALUE ||
                                     f.IMAGE_URL        != c.IMAGE_URL
                         }
+
+                        // ── DIAGNOSTIC ───────────────────────────────────────
+                        android.util.Log.d("FP_FIX", "hasChanges=$hasChanges → ${if (hasChanges) "emitting fresh" else "keeping cache"}")
+                        // ─────────────────────────────────────────────────────
+
                         storeProducts(userType, fresh)
                         if (hasChanges) emit(Async.Success(ProductsDto(data = fresh)))
                     }
-                } catch (e: Exception) { /* silent */ }
+                } catch (e: Exception) {
+                    // ── DIAGNOSTIC ───────────────────────────────────────────
+                    // If the refresh throws, the stale cache is never corrected.
+                    android.util.Log.e("FP_FIX", "api(cached-path) FAILED: ${e.message}", e)
+                    // ─────────────────────────────────────────────────────────
+                }
                 return@flow
             }
         }
@@ -77,11 +128,20 @@ class GetProductsUseCase @Inject constructor(
         // No cache — fetch from API
         try {
             val fresh = callApi(userType).data?.filter { it.PID_PRODUCT != null } ?: emptyList()
+
+            // ── DIAGNOSTIC ───────────────────────────────────────────────────
+            android.util.Log.d(
+                "FP_FIX",
+                "api(no-cache) 316 BOX_SALES_PER=${fresh.firstOrNull { it.PID_PRODUCT == 316 }?.BOX_SALES_PER} count=${fresh.size}"
+            )
+            // ─────────────────────────────────────────────────────────────────
+
             if (fresh.isNotEmpty()) {
                 emit(Async.Success(ProductsDto(data = fresh)))
                 storeProducts(userType, fresh)
             }
         } catch (e: Exception) {
+            android.util.Log.e("FP_FIX", "api(no-cache) FAILED: ${e.message}", e)
             emit(Async.Error(e.message ?: "Failed to load products"))
         }
     }
@@ -138,12 +198,24 @@ class GetProductsUseCase @Inject constructor(
 
     private suspend fun storeProducts(userType: String, items: List<ProductsDtoItem>) {
         val key = cacheKey(userType)
-        // ✅ Only update memory if new data is MORE complete than current
-        // Prevents Phase 1 (100 items) from overwriting full cache (2921 items)
+
+        // ✅ Block only PATHOLOGICAL truncation — a Phase-1 100-item sample or a
+        // half-empty response that would wipe the full table. A normal refresh,
+        // INCLUDING a genuine backend removal that shrinks the list slightly, must
+        // still persist, so we only bail when the incoming set is less than half of
+        // what we already hold. On a full refresh this is a no-op; behaviour for
+        // real adds/removes/stock changes is unchanged.
         val current = memoryCache[key]
-        if (current == null || items.size >= current.size) {
-            memoryCache[key] = items
+        if (current != null && current.size > FIRST_PAGE && items.size < current.size / 2) {
+            android.util.Log.d(
+                "FP_FIX",
+                "store SKIPPED (truncation guard): incoming=${items.size} cached=${current.size} (key=$key)"
+            )
+            return
         }
+
+        memoryCache[key] = items
+
         // Update DB in background
         when (userType) {
             "2" -> {   // wholesale

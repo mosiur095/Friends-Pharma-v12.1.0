@@ -58,7 +58,8 @@ import com.friendspharma.app.core.components.AppName
 import com.friendspharma.app.core.components.ButtonK
 import com.friendspharma.app.core.components.Loader
 import com.friendspharma.app.core.components.NoContent
-import com.friendspharma.app.core.theme.BackGroundDark
+import com.friendspharma.app.core.theme.Primary
+import com.friendspharma.app.core.theme.PrimaryContainer
 import com.friendspharma.app.core.theme.Gray
 import com.friendspharma.app.core.theme.GrayLight
 import com.friendspharma.app.core.theme.TextFieldBackGround
@@ -207,6 +208,19 @@ fun CartScreen(
                                 .toDouble()
                         }
 
+                        // ✅ Derive the discount % from the actual money, NOT from
+                        // cartItem.SALES_PER. SALES_PER is captured when the line is
+                        // added and is not recomputed by the backend, so it goes stale
+                        // (e.g. shows the old wholesale 12% after a user becomes special).
+                        // OFFER_VALUE and TOTAL_PRICE are recomputed correctly, and both
+                        // are line-totals, so quantity cancels:
+                        //   mrpTotal = TOTAL_PRICE + OFFER_VALUE  →  pct = OFFER_VALUE / mrpTotal
+                        val savePercent = remember(cartItem) {
+                            val offer    = cartItem.OFFER_VALUE ?: 0.0
+                            val mrpTotal = (cartItem.TOTAL_PRICE ?: 0.0) + offer
+                            if (mrpTotal > 0.0) (offer / mrpTotal) * 100.0 else 0.0
+                        }
+
                         Card(
                             modifier = Modifier
                                 .padding(vertical = 5.dp)
@@ -238,7 +252,7 @@ fun CartScreen(
                                         Spacer(modifier = Modifier.width(5.dp))
                                         Box(
                                             modifier = Modifier.background(
-                                                BackGroundDark,
+                                                PrimaryContainer,
                                                 RoundedCornerShape(10.dp)
                                             )
                                         ) {
@@ -246,6 +260,7 @@ fun CartScreen(
                                                 text = cartItem.SALES_UNIT ?: "",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.W600,
+                                                color = Primary,
                                                 modifier = Modifier.padding(5.dp)
                                             )
                                         }
@@ -289,7 +304,7 @@ fun CartScreen(
 
                                     // ✅ Correct save display
                                     Text(
-                                        text = "Save: ${saveAmount}৳ (${cartItem.SALES_PER?.formatPercent() ?: "0"}%)"
+                                        text = "Save: ${saveAmount}৳ (${savePercent.formatPercent()}%)"
                                     )
                                 }
                             }
@@ -352,7 +367,7 @@ fun CartScreen(
                                     Box(
                                         modifier = Modifier
                                             .background(
-                                                BackGroundDark.copy(0.75f),
+                                                PrimaryContainer,
                                                 RoundedCornerShape(8.dp)
                                             )
                                             .fillMaxWidth()
@@ -388,7 +403,11 @@ fun CartScreen(
 
                         Spacer(modifier = Modifier.height(20.dp))
 
-                        ButtonK(text = R.string.submit_order) {
+                        ButtonK(
+                            text = R.string.submit_order,
+                            backGroundColor = Primary,
+                            textColor = Color.White
+                        ) {
                             viewModel.submitOrder(context, activity, navAction::pop)
                         }
                     }

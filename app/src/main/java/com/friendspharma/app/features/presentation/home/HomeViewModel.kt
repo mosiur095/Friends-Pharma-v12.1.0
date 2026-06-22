@@ -315,7 +315,12 @@ class HomeViewModel @Inject constructor(
     private fun refreshStockSilently() {
         // Fetch fresh from API every 15s
         // Handles: stock changes + new products + removed products
-        getProductsUseCase.invoke().onEach { result ->
+        //
+        // isForceRefresh = true → skip the cache path so this poll receives ONLY
+        // the single fresh API list. Without it, invoke() also replays the 100-item
+        // Phase-1 cache emission, which the removed-products diff below misreads as
+        // "2400+ products removed" and shrinks the UI to 100 until the next emission.
+        getProductsUseCase.invoke(isForceRefresh = true).onEach { result ->
             when (result) {
                 is Async.Success -> {
                     val freshProducts = result.data?.data ?: return@onEach
@@ -429,22 +434,33 @@ class HomeViewModel @Inject constructor(
                         )
 
                         val freshUserType = user.USER_TYPE?.toString() ?: return@onEach
-                        if (freshUserType != MainActivity.userType.value) {
-                            // userType changed server-side — clear cache so next
-                            // getProducts() fetches correct BOX/LEAF pricing.
-                            // Clears the OLD userType's bucket (memory + correct table).
-                            val oldUserType = MainActivity.userType.value
-                            viewModelScope.launch {
-                                getProductsUseCase.clearCacheFor(oldUserType)
-                            }
+
+                        // Delivery man has no product screen — set type, route out,
+                        // and stop here so the product re-fetch below never runs for
+                        // type "4" (which would otherwise pull retail products).
+                        if (freshUserType == "4") {
                             MainActivity.userType.value = freshUserType
-                            checkBoxOrLeaf()
-                        } else {
-                            MainActivity.userType.value = freshUserType
+                            navAction.navToDeliveryMan()
+                            return@onEach
                         }
 
-                        if (freshUserType == "4") {
-                            navAction.navToDeliveryMan()
+                        if (freshUserType != MainActivity.userType.value) {
+                            // Server-resolved userType differs from the type we ALREADY
+                            // fetched products under. init() launches getProducts() and
+                            // getUserProfile() concurrently, so getProducts() can win the
+                            // race using a stale type — leaving state.products holding the
+                            // WRONG bucket's pricing (e.g. wholesale BOX_SALES_PER shown to
+                            // a special user). Clearing + re-filtering is NOT enough; we
+                            // must re-fetch under the correct type.
+                            val oldUserType = MainActivity.userType.value
+                            MainActivity.userType.value = freshUserType  // set FIRST so invoke() captures it
+                            viewModelScope.launch {
+                                getProductsUseCase.clearCacheFor(oldUserType) // drop stale old-bucket data
+                                checkBoxOrLeaf()                              // correct Box/Leaf for new type
+                                getProducts()                                 // ✅ re-fetch correct-type pricing
+                            }
+                        } else {
+                            MainActivity.userType.value = freshUserType
                         }
                     }
                     is Async.Error<*>   -> {}

@@ -23,15 +23,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.friendspharma.app.core.theme.BackGroundDark
+import com.friendspharma.app.core.theme.Gray
 import com.friendspharma.app.core.theme.GrayExtraLight
 import com.friendspharma.app.core.theme.Primary
 
 @Composable
 fun ButtonK(
     text: Int,
-    textColor: Color = Primary,
-    backGroundColor: Color = BackGroundDark,
+    textColor: Color = Color.White,
+    backGroundColor: Color = Primary,
     borderColor: Color = Color.Transparent,
     height: Int = 45,
     isLoading: Boolean = false,
@@ -67,7 +67,7 @@ fun ButtonK(
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = stringResource(id = text),
-                color = textColor,
+                color = if (isValid && !isLoading) textColor else Gray,
                 fontSize = 16.sp,
                 fontWeight = fontWeight,
             )

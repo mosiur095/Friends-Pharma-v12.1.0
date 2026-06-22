@@ -21,7 +21,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.friendspharma.app.core.theme.BackGroundDark
+import com.friendspharma.app.core.theme.PrimaryContainer
 import com.friendspharma.app.core.theme.Primary
 import com.friendspharma.app.features.data.remote.model.CartInfoDto
 import com.friendspharma.app.features.data.remote.model.ProductsDtoItem
@@ -50,7 +50,7 @@ fun IncreaseDecrease(
         // ✅ Minus Button
         Box(
             modifier = Modifier
-                .background(BackGroundDark, shape = RoundedCornerShape(5.dp))
+                .background(PrimaryContainer, shape = RoundedCornerShape(5.dp))
                 .size(30.dp)
                 .clickable {
                     isAdd.value = false
@@ -69,6 +69,7 @@ fun IncreaseDecrease(
                     text = "-",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
+                    color = Primary,
                     style = TextStyle(
                         platformStyle = PlatformTextStyle(
                             includeFontPadding = false
@@ -93,7 +94,7 @@ fun IncreaseDecrease(
         // ✅ Plus Button
         Box(
             modifier = Modifier
-                .background(BackGroundDark, shape = RoundedCornerShape(5.dp))
+                .background(PrimaryContainer, shape = RoundedCornerShape(5.dp))
                 .size(30.dp)
                 .clickable {
                     isAdd.value = true
@@ -112,6 +113,7 @@ fun IncreaseDecrease(
                     text = "+",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
+                    color = Primary,
                     style = TextStyle(
                         platformStyle = PlatformTextStyle(
                             includeFontPadding = false
